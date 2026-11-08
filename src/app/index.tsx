@@ -38,6 +38,13 @@ function sortDocs(docs: PdfDoc[], key: SortKey) {
   }
 }
 
+const keyExtractor = (d: PdfDoc) => d.id;
+
+// Module-level so the list does not remount every separator on each render.
+function Separator() {
+  return <View style={styles.separator} />;
+}
+
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const { colors: c, settings, update } = useSettings();
@@ -143,6 +150,13 @@ export default function LibraryScreen() {
     { key: 'delete', label: 'Remove from library', icon: 'trash-outline', destructive: true, onPress: () => confirmDelete(doc) },
   ];
 
+  const renderItem = useCallback(
+    ({ item }: { item: PdfDoc }) => (
+      <DocRow doc={item} onOpen={openDoc} onMore={setMenuDoc} onToggleFavorite={onToggleFavorite} />
+    ),
+    [openDoc, onToggleFavorite],
+  );
+
   const showContinue = tab === 'all' && !query && lastOpened && docs.length > 0;
 
   const header = (
@@ -236,13 +250,13 @@ export default function LibraryScreen() {
     <View style={[styles.flex, { backgroundColor: c.bg }]}>
       <FlatList
         data={visible}
-        keyExtractor={(d) => d.id}
-        renderItem={({ item }) => (
-          <DocRow doc={item} onOpen={openDoc} onMore={setMenuDoc} onToggleFavorite={onToggleFavorite} />
-        )}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
         ListHeaderComponent={header}
         ListEmptyComponent={empty}
-        ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+        ItemSeparatorComponent={Separator}
+        initialNumToRender={12}
+        windowSize={7}
         contentContainerStyle={{
           paddingTop: insets.top + 8,
           paddingBottom: insets.bottom + 110,
@@ -306,6 +320,7 @@ export default function LibraryScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  separator: { height: 10 },
   titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   title: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
   subtitle: { fontSize: 13.5, marginTop: 2 },

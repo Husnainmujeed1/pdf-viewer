@@ -12,7 +12,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // Deep links / "Open with" land on /open; keep the library underneath so Back works.
 export const unstable_settings = {
-  initialRouteName: 'index',
+  anchor: 'index',
 };
 
 function AppStack() {

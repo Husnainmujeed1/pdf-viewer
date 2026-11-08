@@ -32,7 +32,7 @@ const SECTIONS: { title: string; body: string }[] = [
   },
   {
     title: 'Contact',
-    body: 'Questions about this policy can be sent to the developer email address shown on the Google Play store listing.',
+    body: 'Questions about this policy can be sent to husnainmujeed1@gmail.com.',
   },
 ];
 

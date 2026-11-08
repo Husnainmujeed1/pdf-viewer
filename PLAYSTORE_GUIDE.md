@@ -6,7 +6,7 @@
 |---|---|---|
 | **Package name** (permanent after the first upload) | `app.json` → `android.package` | `com.azeempro.pdfreader` |
 | App name on the phone | `app.json` → `name` | `PDF Reader` |
-| Contact email in the privacy policy | `store-assets/PRIVACY_POLICY.md` | `YOUR-EMAIL@example.com` |
+| Contact email in the privacy policy | `store-assets/PRIVACY_POLICY.md` | `husnainmujeed1@gmail.com` |
 
 If you change the package, also update `ios.bundleIdentifier` and the fallback in `src/app/settings.tsx` (`PACKAGE`).
 

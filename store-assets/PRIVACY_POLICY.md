@@ -23,4 +23,4 @@ The app does not knowingly collect information from anyone, including children u
 If this policy changes, the updated version will be published at this address.
 
 ## Contact
-For any questions about this policy, contact: **YOUR-EMAIL@example.com**
+For any questions about this policy, contact: **husnainmujeed1@gmail.com**

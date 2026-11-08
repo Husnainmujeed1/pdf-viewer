@@ -4,7 +4,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as NavigationBar from 'expo-navigation-bar';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Pdf, { PdfRef, TableContent } from 'react-native-pdf';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -45,6 +45,8 @@ export default function ViewerScreen() {
   const { colors: c, settings, update } = useSettings();
   const insets = useSafeAreaInsets();
   const pdfRef = useRef<PdfRef>(null);
+  const viewerBg = c.viewerBg;
+  const primary = c.primary;
 
   const [startPage, setStartPage] = useState(() => Math.max(1, doc?.page ?? 1));
   const pageRef = useRef(startPage);
@@ -67,6 +69,29 @@ export default function ViewerScreen() {
   useEffect(() => {
     if (id && doc) updateDoc(id, { openedAt: Date.now() });
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reading position is saved shortly after scrolling stops (and on leave), not on every page:
+  // each library update re-renders every screen in the stack and rewrites storage.
+  const savePageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savePageSoon = useCallback(
+    (p: number) => {
+      if (savePageTimer.current) clearTimeout(savePageTimer.current);
+      savePageTimer.current = setTimeout(() => {
+        savePageTimer.current = null;
+        if (id) updateDoc(id, { page: p });
+      }, 800);
+    },
+    [id, updateDoc],
+  );
+  useEffect(
+    () => () => {
+      if (savePageTimer.current && id) {
+        clearTimeout(savePageTimer.current);
+        updateDoc(id, { page: pageRef.current });
+      }
+    },
+    [id, updateDoc],
+  );
 
   // Keep the screen on while reading (optional).
   useEffect(() => {
@@ -100,6 +125,93 @@ export default function ViewerScreen() {
     [pages],
   );
 
+  const onPressLink = useCallback((url: string) => {
+    Alert.alert('Open link?', url, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Open', onPress: () => Linking.openURL(url).catch(() => toast('Cannot open this link')) },
+    ]);
+  }, []);
+
+  // Native callbacks read the latest state through this ref, so the <Pdf> element below can be
+  // memoized and is not re-rendered on every page change.
+  const pdfHandlers = useRef({
+    onLoadComplete: (_n: number, _toc: TableContent[] | undefined) => {},
+    onPageChanged: (_p: number, _n: number) => {},
+    onError: (_err: unknown) => {},
+  });
+  useLayoutEffect(() => {
+    pdfHandlers.current = {
+      onLoadComplete: (n, tableContents) => {
+        if (!doc) return;
+        setLoaded(true);
+        setPages(n);
+        setToc(flattenToc(tableContents));
+        setAskPassword(false);
+        setPasswordError(null);
+        const patch: Partial<typeof doc> = { pages: n, locked: !!password };
+        if (pageRef.current > n) {
+          pageRef.current = n;
+          setPage(n);
+          patch.page = n;
+        }
+        updateDoc(doc.id, patch);
+      },
+      onPageChanged: (p, n) => {
+        pageRef.current = p;
+        setPage(p);
+        if (n) setPages(n);
+        savePageSoon(p);
+      },
+      onError: (err) => {
+        if (!doc) return;
+        const msg = String((err as Error)?.message ?? err);
+        if (/password/i.test(msg)) {
+          setPasswordError(password ? 'Incorrect password. Please try again.' : null);
+          setAskPassword(true);
+          updateDoc(doc.id, { locked: true });
+          return;
+        }
+        console.warn('[pdf] load error', msg);
+        setError(msg);
+      },
+    };
+  });
+
+  const pdfKey = `${startPage}-${settings.horizontal}-${settings.paging}-${password ?? ''}`;
+  const docUri = doc?.uri;
+  const pdfView = useMemo(
+    () =>
+      docUri ? (
+        <Pdf
+          key={pdfKey}
+          ref={pdfRef}
+          source={{ uri: docUri }}
+          page={startPage}
+          password={password}
+          horizontal={settings.horizontal}
+          enablePaging={settings.paging}
+          fitPolicy={settings.horizontal ? 2 : 0}
+          spacing={settings.paging ? 0 : 8}
+          minScale={1}
+          maxScale={6}
+          enableDoubleTapZoom
+          enableAntialiasing
+          enableAnnotationRendering
+          trustAllCerts={false}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+          style={[styles.flex, { backgroundColor: viewerBg }]}
+          renderActivityIndicator={() => <ActivityIndicator color={primary} size="large" />}
+          onLoadComplete={(n, _path, _size, tableContents) => pdfHandlers.current.onLoadComplete(n, tableContents)}
+          onPageChanged={(p, n) => pdfHandlers.current.onPageChanged(p, n)}
+          onError={(err) => pdfHandlers.current.onError(err)}
+          onPageSingleTap={() => setChrome((v) => !v)}
+          onPressLink={onPressLink}
+        />
+      ) : null,
+    [pdfKey, docUri, startPage, password, settings.horizontal, settings.paging, viewerBg, primary, onPressLink],
+  );
+
   /** Re-creates the native view (needed for layout changes) while preserving position. */
   const remountAtCurrentPage = () => {
     setStartPage(pageRef.current);
@@ -116,13 +228,6 @@ export default function ViewerScreen() {
     const added = toggleBookmark(doc.id, page);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     toast(added ? `Page ${page} bookmarked` : 'Bookmark removed');
-  };
-
-  const onPressLink = (url: string) => {
-    Alert.alert('Open link?', url, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Open', onPress: () => Linking.openURL(url).catch(() => toast('Cannot open this link')) },
-    ]);
   };
 
   if (!doc || missing) {
@@ -193,8 +298,6 @@ export default function ViewerScreen() {
     },
   ];
 
-  const pdfKey = `${startPage}-${settings.horizontal}-${settings.paging}-${password ?? ''}`;
-
   return (
     <View style={[styles.flex, { backgroundColor: c.viewerBg }]}>
       <StatusBar hidden={!chrome} style={c.dark ? 'light' : 'dark'} animated />
@@ -208,60 +311,7 @@ export default function ViewerScreen() {
         </View>
       ) : (
         <View style={styles.flex}>
-          <Pdf
-            key={pdfKey}
-            ref={pdfRef}
-            source={{ uri: doc.uri }}
-            page={startPage}
-            password={password}
-            horizontal={settings.horizontal}
-            enablePaging={settings.paging}
-            fitPolicy={settings.horizontal ? 2 : 0}
-            spacing={settings.paging ? 0 : 8}
-            minScale={1}
-            maxScale={6}
-            enableDoubleTapZoom
-            enableAntialiasing
-            enableAnnotationRendering
-            trustAllCerts={false}
-            showsVerticalScrollIndicator={false}
-            showsHorizontalScrollIndicator={false}
-            style={[styles.flex, { backgroundColor: c.viewerBg }]}
-            renderActivityIndicator={() => <ActivityIndicator color={c.primary} size="large" />}
-            onLoadComplete={(n, _path, _size, tableContents) => {
-              setLoaded(true);
-              setPages(n);
-              setToc(flattenToc(tableContents));
-              setAskPassword(false);
-              setPasswordError(null);
-              const patch: Partial<typeof doc> = { pages: n, locked: !!password };
-              if (pageRef.current > n) {
-                pageRef.current = n;
-                setPage(n);
-                patch.page = n;
-              }
-              updateDoc(doc.id, patch);
-            }}
-            onPageChanged={(p, n) => {
-              pageRef.current = p;
-              setPage(p);
-              if (n) setPages(n);
-              updateDoc(doc.id, { page: p });
-            }}
-            onError={(err) => {
-              const msg = String((err as Error)?.message ?? err);
-              if (/password/i.test(msg)) {
-                setPasswordError(password ? 'Incorrect password. Please try again.' : null);
-                setAskPassword(true);
-                updateDoc(doc.id, { locked: true });
-                return;
-              }
-              console.warn('[pdf] load error', msg);
-              setError(msg);
-            }}
-            onPageSingleTap={() => setChrome((v) => !v)}
-            onPressLink={onPressLink}
-          />
+          {pdfView}
 
           {filter !== 'none' ? (
             <View
